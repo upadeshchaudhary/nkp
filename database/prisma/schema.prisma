@@ -1,0 +1,215 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+enum ContentStatus {
+  DRAFT
+  REVIEW
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum Language {
+  ne
+  en
+}
+
+enum ContentType {
+  ARTICLE
+  RESOURCE
+  NOTICE
+  EXPLAINER
+}
+
+enum ContentRightsType {
+  ORIGINAL
+  THIRD_PARTY
+}
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique
+  passwordHash    String?   @map("password_hash")
+  googleSubject   String?   @unique @map("google_subject")
+  status          UserStatus @default(PENDING)
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  roles    UserRole[]
+  sessions Session[]
+  content  Content[]
+  mediaAssets MediaAsset[]
+  profile  UserProfile?
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+model UserProfile {
+  userId      String  @id @map("user_id") @db.Uuid
+  displayName String  @map("display_name")
+  bio         String?
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_profiles")
+}
+
+model Role {
+  id          String @id @default(uuid()) @db.Uuid
+  name        String @unique
+  description String?
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String @id @default(uuid()) @db.Uuid
+  key         String @unique
+  description String?
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId String @map("user_id") @db.Uuid
+  roleId String @map("role_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model Session {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  metadata  Json?
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  beforeData Json?    @map("before_data")
+  afterData  Json?    @map("after_data")
+  createdAt  DateTime @default(now()) @map("created_at")
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model Category {
+  id        String   @id @default(uuid()) @db.Uuid
+  parentId  String?  @map("parent_id") @db.Uuid
+  slug      String
+  name      String
+  module    String
+  sortOrder Int      @default(0) @map("sort_order")
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryTree")
+
+  @@unique([module, slug])
+  @@map("categories")
+}
+
+model Content {
+  id          String        @id @default(uuid()) @db.Uuid
+  type        ContentType
+  slug        String
+  status      ContentStatus @default(DRAFT)
+  authorId    String        @map("author_id") @db.Uuid
+  sourceUrl   String?       @map("source_url")
+  rights      String?
+  rightsType  ContentRightsType? @map("rights_type")
+  publishedAt DateTime?     @map("published_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  author       User                 @relation(fields: [authorId], references: [id])
+  translations ContentTranslation[]
+  mediaAssets  MediaAsset[]
+
+  @@unique([type, slug])
+  @@index([status, publishedAt])
+  @@map("content")
+}
+
+model MediaAsset {
+  id           String   @id @default(uuid()) @db.Uuid
+  storageKey   String   @unique @map("storage_key")
+  originalName String   @map("original_name")
+  mimeType     String   @map("mime_type")
+  sizeBytes    Int      @map("size_bytes")
+  altText      String?  @map("alt_text")
+  uploadedById String   @map("uploaded_by_id") @db.Uuid
+  contentId    String?  @map("content_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  content      Content? @relation(fields: [contentId], references: [id], onDelete: SetNull)
+
+  @@index([uploadedById, createdAt])
+  @@index([contentId, createdAt])
+  @@map("media_assets")
+}
+
+model ContentTranslation {
+  contentId      String   @map("content_id") @db.Uuid
+  language       Language
+  title          String
+  summary        String?
+  body           String
+  seoTitle       String?  @map("seo_title")
+  seoDescription String?  @map("seo_description")
+  content        Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  @@id([contentId, language])
+  @@map("content_translations")
+}
+
+model SystemSetting {
+  key       String   @id
+  value     Json
+  isPublic  Boolean  @default(false) @map("is_public")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
